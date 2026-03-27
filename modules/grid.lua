@@ -39,6 +39,107 @@ return {
     ---@type table<string,GridRecipe[]>
     local gridRecipes = {}
 
+    ---Save the current grid recipes to the recipes file
+    local function saveGridRecipes()
+      local data = {
+        recipes = {
+          crafting = {}
+        }
+      }
+      
+      -- Convert gridRecipes back to crafting format
+      for itemName, recipes in pairs(gridRecipes) do
+        for _, recipe in ipairs(recipes) do
+          local craftingRecipe = {
+            type = recipe.shaped and "minecraft:crafting_shaped" or "minecraft:crafting_shapeless",
+            result = {
+              item = itemName,
+              count = recipe.produces
+            }
+          }
+          
+          if recipe.shaped then
+            craftingRecipe.pattern = {}
+            craftingRecipe.key = {}
+            
+            -- Convert grid recipe to pattern format
+            local keys = {}
+            local keyChars = { "A", "B", "C", "D", "E", "F", "G", "H", "I" }
+            local keyIndex = 1
+            
+            for i = 1, 9 do
+              local ingredient = recipe.recipe[i]
+              if ingredient == 0 then
+                table.insert(craftingRecipe.pattern, " ")
+              else
+                -- Handle multiple ingredient options
+                if type(ingredient) == "table" then
+                  local options = {}
+                  for _, itemIndex in ipairs(ingredient) do
+                    local itemName = crafting.getItemName(itemIndex)
+                    table.insert(options, itemName)
+                  end
+                  local keyChar = keyChars[keyIndex]
+                  keys[keyChar] = options
+                  table.insert(craftingRecipe.pattern, keyChar)
+                  keyIndex = keyIndex + 1
+                else
+                  local itemName = crafting.getItemName(ingredient)
+                  local keyChar = keyChars[keyIndex]
+                  keys[keyChar] = itemName
+                  table.insert(craftingRecipe.pattern, keyChar)
+                  keyIndex = keyIndex + 1
+                end
+              end
+              
+              -- Add line breaks for 3x3 grid
+              if i % 3 == 0 and i < 9 then
+                -- Pattern is built row by row, so we'll format it properly
+              end
+            end
+            
+            -- Format pattern into rows
+            local formattedPattern = {}
+            for i = 1, #craftingRecipe.pattern, 3 do
+              table.insert(formattedPattern, table.concat({craftingRecipe.pattern[i], craftingRecipe.pattern[i+1] or "", craftingRecipe.pattern[i+2] or ""}))
+            end
+            craftingRecipe.pattern = formattedPattern
+            craftingRecipe.key = keys
+          else
+            -- Shapeless recipe
+            craftingRecipe.ingredients = {}
+            for _, ingredient in ipairs(recipe.recipe) do
+              if ingredient ~= 0 then
+                if type(ingredient) == "table" then
+                  -- Multiple options
+                  local options = {}
+                  for _, itemIndex in ipairs(ingredient) do
+                    table.insert(options, crafting.getItemName(itemIndex))
+                  end
+                  table.insert(craftingRecipe.ingredients, options)
+                else
+                  table.insert(craftingRecipe.ingredients, crafting.getItemName(ingredient))
+                end
+              end
+            end
+          end
+          
+          table.insert(data.recipes.crafting, craftingRecipe)
+        end
+      end
+      
+      -- Ensure recipes directory exists
+      if not fs.exists("recipes") then
+        fs.makeDir("recipes")
+      end
+      
+      local f = fs.open("recipes/recipes.json", "w")
+      if f then
+        f.write(json.encode(data))
+        f.close()
+      end
+    end
+
     local crafting = loaded.crafting.interface.recipeInterface
 
     ---Cache information about a GridRecipe that can be inferred from stored data
@@ -93,6 +194,7 @@ return {
       table.insert(gridRecipes[name], gridRecipe)
       
       updateCraftableList()
+      saveGridRecipes() -- Save recipes to file
     end
 
     ---Remove a grid recipe
@@ -100,9 +202,10 @@ return {
       common.enforceType(name, 1, "string")
       if gridRecipes[name] then
         gridRecipes[name] = nil
+        updateCraftableList()
+        saveGridRecipes() -- Save recipes to file
         return true
       end
-      updateCraftableList()
       return false
     end
 
@@ -256,9 +359,11 @@ return {
       end,
       NEW_RECIPE = function(message)
         addGridRecipe(message.name, message.amount, message.recipe, message.shaped)
+        saveGridRecipes() -- Save recipes to file
       end,
       REMOVE_RECIPE = function(message)
         removeGridRecipe(message.name)
+        saveGridRecipes() -- Save recipes to file
       end
     }
 
