@@ -16,16 +16,24 @@ if wirelessMode and not settings.get("misc.websocketURL") then
   settings.save()
 end
 
-
 if not settings.get("misc.style") then
-  settings.define("misc.style", { description = "Display style: horizontal, vertical, big, text, pie", type = "string" })
-  print("Choose display style (horizontal, vertical, big, text, pie):")
+  settings.define("misc.style", { description = "Display style: horizontal, vertical, big, text, pie, line", type = "string" })
+  print("Choose display style (horizontal, vertical, big, text, pie, line):")
   local s = read()
   if s == "" then s = "horizontal" end
   settings.set("misc.style", s)
   settings.save()
 end
 
+if not settings.get("misc.lineInterval") then
+  settings.define("misc.lineInterval", { description = "Interval in seconds for line graph updates", type = "number" })
+  print("Enter line graph update interval in seconds (default 30):")
+  local s = read()
+  local n = tonumber(s)
+  if not n then n = 30 end
+  settings.set("misc.lineInterval", n)
+  settings.save()
+end
 
 if not settings.get("misc.scale") then
   settings.define("misc.scale", { description = "Text scale (0.5 to 5)", type = "number" })
@@ -46,7 +54,6 @@ if not settings.get("misc.percentageCutoff") and settings.get("misc.style") == "
   settings.set("misc.percentageCutoff", n)
   settings.save()
 end
-
 
 if not settings.get("misc.theme") then
   settings.define("misc.theme", { description = "Display theme: light, dark", type = "string" })
@@ -81,7 +88,6 @@ local currentTheme = settings.get("misc.theme") or "light"
 
 local function setThemeColors()
   if currentTheme == "dark" then
-    -- Dark theme: pure black background, light text
     return {
       labelFG = colors.white,
       labelBG = colors.black,
@@ -89,10 +95,11 @@ local function setThemeColors()
       freeBG = colors.gray,
       alertColor = colors.orange,
       pieColors = {colors.blue, colors.green, colors.orange, colors.purple, colors.cyan, colors.yellow, colors.lime, colors.pink},
-      otherColor = colors.lightGray
+      otherColor = colors.lightGray,
+      lineTotalColor = colors.cyan,
+      lineProcColor = colors.orange
     }
   else
-    -- Light theme: pure white background, dark text
     return {
       labelFG = colors.black,
       labelBG = colors.white,
@@ -100,7 +107,9 @@ local function setThemeColors()
       freeBG = colors.gray,
       alertColor = colors.orange,
       pieColors = {colors.blue, colors.green, colors.orange, colors.purple, colors.cyan, colors.yellow, colors.lime, colors.pink},
-      otherColor = colors.lightGray
+      otherColor = colors.lightGray,
+      lineTotalColor = colors.blue,
+      lineProcColor = colors.red
     }
   end
 end
@@ -113,86 +122,22 @@ local freeBG = colorsConfig.freeBG
 local alertColor = colorsConfig.alertColor
 local pieColors = colorsConfig.pieColors
 local otherColor = colorsConfig.otherColor
+local lineTotalColor = colorsConfig.lineTotalColor
+local lineProcColor = colorsConfig.lineProcColor
 
 -- Custom Font Definition
 local bigFont = {
-  ["0"] = {
-    "  ___  ",
-    " / _ \\ ",
-    "| | | |",
-    "| |_| |",
-    " \\___/ "
-  },
-  ["1"] = {
-    "  _  ",
-    " / | ",
-    " | | ",
-    " | | ",
-    " |_| "
-  },
-  ["2"] = {
-    "  ____  ",
-    " |___ \\ ",
-    "  __) | ",
-    " / __/  ",
-    "|_____| "
-  },
-  ["3"] = {
-    " _____ ",
-    "|___ / ",
-    "  |_ \\ ",
-    " ___) |",
-    "|____/ "
-  },
-  ["4"] = {
-    " _  _   ",
-    "| || |  ",
-    "| || |_ ",
-    "|__  _| ",
-    "   |_|  "
-  },
-  ["5"] = {
-    " ____  ",
-    "| ___| ",
-    "|___ \\ ",
-    " ___) |",
-    "|____/ "
-  },
-  ["6"] = {
-    "  __   ",
-    " / /_  ",
-    "| '_ \\ ",
-    "| (_) |",
-    " \\___/ "
-  },
-  ["7"] = {
-    " _____ ",
-    "|___  |",
-    "  / /  ",
-    " / /   ",
-    "/_/    "
-  },
-  ["8"] = {
-    "  ___  ",
-    " ( _ ) ",
-    " / _ \\ ",
-    "| (_) |",
-    " \\___/ "
-  },
-  ["9"] = {
-    "  ___  ",
-    " / _ \\ ",
-    "| (_) |",
-    " \\__, |",
-    "   /_/ "
-  },
-  ["%"] = {
-    " _  __",
-    "(_)/ /",
-    "  / / ",
-    " / /_ ",
-    "/_/(_)"
-  }
+  ["0"] = {"  ___  ", " / _ \\ ", "| | | |", "| |_| |", " \\___/ "},
+  ["1"] = {"  _  ", " / | ", " | | ", " | | ", " |_| "},
+  ["2"] = {"  ____  ", " |___ \\ ", "  __) | ", " / __/  ", "|_____| "},
+  ["3"] = {" _____ ", "|___ / ", "  |_ \\ ", " ___) |", "|____/ "},
+  ["4"] = {" _  _   ", "| || |  ", "| || |_ ", "|__  _| ", "   |_|  "},
+  ["5"] = {" ____  ", "| ___| ", "|___ \\ ", " ___) |", "|____/ "},
+  ["6"] = {"  __   ", " / /_  ", "| '_ \\ ", "| (_) |", " \\___/ "},
+  ["7"] = {" _____ ", "|___  |", "  / /  ", " / /   ", "/_/    "},
+  ["8"] = {"  ___  ", " ( _ ) ", " / _ \\ ", "| (_) |", " \\___/ "},
+  ["9"] = {"  ___  ", " / _ \\ ", "| (_) |", " \\__, |", "   /_/ "},
+  ["%"] = {" _  __", "(_)/ /", "  / / ", " / /_ ", "/_/(_)"}
 }
 
 -- Drawing Helpers
@@ -223,7 +168,6 @@ end
 -- Renders the custom ASCII font
 local function drawBigNumbers(text, startY, fg, bg)
   setColors(fg, bg)
-  -- Calculate total width first to center
   local totalWidth = 0
   local charGrids = {}
   
@@ -234,9 +178,7 @@ local function drawBigNumbers(text, startY, fg, bg)
     totalWidth = totalWidth + #grid[1]
   end
   
-  -- Add spacing
   totalWidth = totalWidth + (#charGrids - 1)
-  
   local w, _ = monitor.getSize()
   local startX = math.floor((w - totalWidth) / 2) + 1
   
@@ -250,21 +192,87 @@ local function drawBigNumbers(text, startY, fg, bg)
   end
 end
 
+-- History Tracking State & Persistence
+local historyTotal = {}
+local historyProcessed = {}
+local lastTotal = nil
+local historyFilePath = ".line_history.txt"
+
+local function loadHistory()
+  if fs.exists(historyFilePath) then
+    local file = fs.open(historyFilePath, "r")
+    if file then
+      local data = textutils.unserialize(file.readAll())
+      file.close()
+      if type(data) == "table" then
+        historyTotal = data.total or {}
+        historyProcessed = data.processed or {}
+        lastTotal = data.lastTotal
+      end
+    end
+  end
+end
+
+local function saveHistory()
+  local file = fs.open(historyFilePath, "w")
+  if file then
+    file.write(textutils.serialize({
+      total = historyTotal,
+      processed = historyProcessed,
+      lastTotal = lastTotal
+    }))
+    file.close()
+  end
+end
+
+local function trackHistory()
+  loadHistory()
+  while true do
+    local interval = settings.get("misc.lineInterval") or 30
+    local ok, usage = pcall(lib.getUsage)
+    
+    if ok and usage then
+      local currentTotal = usage.used or 0
+      if not lastTotal then lastTotal = currentTotal end
+      
+      -- Calculate absolute change as items processed (in or out)
+      local processed = math.abs(currentTotal - lastTotal)
+      
+      table.insert(historyTotal, currentTotal)
+      table.insert(historyProcessed, processed)
+      
+      -- Dynamically constrain history to monitor width
+      local w, _ = monitor.getSize()
+      local maxPoints = w
+      if maxPoints < 1 then maxPoints = 50 end
+      
+      while #historyTotal > maxPoints do table.remove(historyTotal, 1) end
+      while #historyProcessed > maxPoints do table.remove(historyProcessed, 1) end
+      
+      lastTotal = currentTotal
+      saveHistory()
+      
+      -- Force update if we are on the line graph view
+      if settings.get("misc.style") == "line" then
+        os.queueEvent("update")
+      end
+    end
+    sleep(interval)
+  end
+end
+
 -- Style Definitions
 local styles = {}
 
--- 1. Original Horizontal Bar
 styles.horizontal = function(usage, w, h)
   local barH = h - 2
   if barH < 1 then barH = 1 end
 
-  -- Header
   setColors(labelFG, labelBG)
   monitor.clear()
   local slots = string.format("Total %u", usage.total)
   centerText(1, slots)
 
-  -- Footer Stats
   local used = string.format("Used %u", usage.used)
   monitor.setCursorPos(1, h)
   monitor.write(used)
@@ -273,7 +281,6 @@ styles.horizontal = function(usage, w, h)
   monitor.setCursorPos(w - #free + 1, h)
   monitor.write(free)
 
-  -- The Bar
   local pct = getPercentage(usage)
   local usedWidth = math.floor(pct * w)
   
@@ -283,7 +290,6 @@ styles.horizontal = function(usage, w, h)
   fillRect(usedWidth + 1, 2, w - usedWidth, barH)
 end
 
--- 2. Vertical Bar (Cloned style, vertical graph)
 styles.vertical = function(usage, w, h)
   local barH = h - 2
   if barH < 1 then barH = 1 end
@@ -291,21 +297,18 @@ styles.vertical = function(usage, w, h)
   setColors(labelFG, labelBG)
   monitor.clear()
 
-  -- Header
   local slots = string.format("Total %u", usage.total)
   centerText(1, slots)
   
-  -- Footer Stats
   local used = string.format("Used %u", usage.used)
   local free = string.format("Free %u", usage.free)
   
-  -- If narrow, stack used/free, otherwise put on same line
   if (w < #used + #free + 2) then
     monitor.setCursorPos(1, h-1)
     monitor.write(used)
     monitor.setCursorPos(1, h)
     monitor.write(free)
-    barH = barH - 1 -- Reduce bar height for extra text line
+    barH = barH - 1 
   else
     monitor.setCursorPos(1, h)
     monitor.write(used)
@@ -313,21 +316,17 @@ styles.vertical = function(usage, w, h)
     monitor.write(free)
   end
 
-  -- The Vertical Bar
   local pct = getPercentage(usage)
   local usedHeight = math.floor(pct * barH)
   local freeHeight = barH - usedHeight
 
-  -- Draw Free (Top part of bar)
   setColors(labelFG, freeBG)
   fillRect(1, 2, w, freeHeight)
   
-  -- Draw Used (Bottom part of bar)
   setColors(labelFG, usedBG)
   fillRect(1, 2 + freeHeight, w, usedHeight)
 end
 
--- 3. Big Text (Custom Font)
 styles.big = function(usage, w, h)
   local pct = getPercentage(usage)
   
@@ -335,18 +334,15 @@ styles.big = function(usage, w, h)
   if pct > 0.75 then bg = usedBG 
   elseif pct > 0.5 then bg = alertColor end
 
-  -- Use theme-aware text color
   local textColor = currentTheme == "dark" and colors.white or colors.black
   setColors(textColor, bg)
   monitor.clear()
 
   local text = string.format("%d%%", math.floor(pct * 100))
   
-  -- Center vertically (font is 5 high)
   local fontY = math.floor((h - 5) / 2) + 1
   drawBigNumbers(text, fontY, textColor, bg)
   
-  -- Subtext
   monitor.setTextScale(0.5)
   local w2, h2 = monitor.getSize()
   setColors(textColor, bg)
@@ -354,7 +350,6 @@ styles.big = function(usage, w, h)
   monitor.setTextScale(textScale)
 end
 
--- 4. Text List (Detailed info)
 styles.text = function(usage, w, h)
   setColors(labelFG, labelBG)
   monitor.clear()
@@ -380,12 +375,10 @@ styles.text = function(usage, w, h)
   end
 end
 
--- 5. Pie Chart (Top Items)
 styles.pie = function(usage, w, h)
   setColors(labelFG, labelBG)
   monitor.clear()
 
-  -- Draw Header and Footer Stats
   local slots = string.format("Total %u", usage.total)
   centerText(1, slots)
 
@@ -402,7 +395,6 @@ styles.pie = function(usage, w, h)
     return
   end
 
-  -- Calculate Total Item Count from items list for accurate percentages
   local totalItems = 0
   for _, item in ipairs(usage.items) do
     totalItems = totalItems + (item.count or 0)
@@ -413,10 +405,8 @@ styles.pie = function(usage, w, h)
     return
   end
 
-  -- Sort items by count desc
   table.sort(usage.items, function(a,b) return (a.count or 0) > (b.count or 0) end)
 
-  -- Create Slices (threshold 10%)
   local slices = {}
   local otherCount = 0
   local colorIdx = 1
@@ -443,40 +433,28 @@ styles.pie = function(usage, w, h)
     })
   end
 
-  -- Calculate screen geometry
-  -- Aspect ratio correction: Circle is drawn 1.5x wider than tall to look round on CC monitors
-  
-  -- Constrain by height (leave 1 line top/bottom for header/footer)
-  -- Usable height = h - 2
   local usableH = h - 2
   if usableH < 1 then usableH = 1 end
   
   local radiusH = usableH / 2
-  
-  -- Constrain by width (use ~50% of width for pie, leave 50% for legend)
   local radiusW = (w * 0.5) / 3
   
   local radius = math.min(radiusH, radiusW)
   if radius < 2 then radius = 2 end
 
-  local centerX = math.floor(radius * 1.5) + 2 -- Shift right slightly
-  local centerY = math.floor(usableH / 2) + 2 -- +2 because y starts at 2 (after header)
+  local centerX = math.floor(radius * 1.5) + 2
+  local centerY = math.floor(usableH / 2) + 2
 
-  -- Draw Pie
-  -- Iterate bounding box of circle
   for y = centerY - radius, centerY + radius do
     for x = centerX - (radius*1.5), centerX + (radius*1.5) do
-       local dx = (x - centerX) / 1.5 -- Correct aspect ratio (CC pixels are tall)
+       local dx = (x - centerX) / 1.5 
        local dy = (y - centerY)
        
        local dist = math.sqrt(dx*dx + dy*dy)
        if dist <= radius then
-         -- Calculate Angle (-pi to pi)
          local angle = math.atan2(dy, dx) 
-         -- Normalize to 0 to 1
          local normalizedAngle = (angle + math.pi) / (2 * math.pi)
          
-         -- Find which slice covers this angle
          local currentPct = 0
          local pixelColor = labelBG
          for _, slice in ipairs(slices) do
@@ -487,7 +465,6 @@ styles.pie = function(usage, w, h)
             currentPct = currentPct + slice.pct
          end
          
-         -- Draw only if inside bounds and not overwriting header/footer
          if x >= 1 and x <= w and y >= 2 and y <= h - 1 then
             monitor.setBackgroundColor(pixelColor)
             monitor.setCursorPos(x, y)
@@ -497,7 +474,6 @@ styles.pie = function(usage, w, h)
     end
   end
 
-  -- Draw Legend (Right side)
   local legendX = math.floor(centerX + (radius * 1.5)) + 2
   local legendY = math.floor((usableH - #slices) / 2) + 2
   if legendY < 2 then legendY = 2 end
@@ -508,7 +484,7 @@ styles.pie = function(usage, w, h)
       if yPos <= h - 1 then
         monitor.setCursorPos(legendX, yPos)
         monitor.setBackgroundColor(slice.color)
-        monitor.write(" ") -- Color swatch
+        monitor.write(" ") 
         monitor.setBackgroundColor(labelBG)
         monitor.setTextColor(labelFG)
         local pctStr = math.floor(slice.pct * 100) .. "%"
@@ -518,18 +494,89 @@ styles.pie = function(usage, w, h)
   end
 end
 
+styles.line = function(usage, w, h)
+  setColors(labelFG, labelBG)
+  monitor.clear()
+
+  centerText(1, "Metrics (T: Total, P: Proc)")
+
+  if #historyTotal < 2 then
+    centerText(math.floor(h/2), "Gathering data...")
+    return
+  end
+
+  local graphY = 2
+  local graphH = h - 2
+  if graphH < 2 then return end
+
+  -- Calculate Auto-Scaling Minimums and Maximums
+  local maxT, minT = -math.huge, math.huge
+  local maxP, minP = -math.huge, math.huge
+
+  for _, v in ipairs(historyTotal) do
+    if v > maxT then maxT = v end
+    if v < minT then minT = v end
+  end
+  for _, v in ipairs(historyProcessed) do
+    if v > maxP then maxP = v end
+    if v < minP then minP = v end
+  end
+
+  -- Scale guards to prevent division by zero
+  if maxT == minT then maxT = minT + 1 end
+  if maxP == minP then maxP = minP + 1 end
+  if minP == math.huge then minP = 0 maxP = 1 end
+
+  local startX = w - #historyTotal + 1
+  if startX < 1 then startX = 1 end
+
+  -- Draw the Graph
+  for i = 1, #historyTotal do
+    local x = startX + i - 1
+    if x >= 1 and x <= w then
+      
+      -- Normalize data between 0.0 and 1.0 based on current view bounds
+      local normT = (historyTotal[i] - minT) / (maxT - minT)
+      local yT = graphY + graphH - 1 - math.floor(normT * (graphH - 1))
+      
+      local normP = (historyProcessed[i] - minP) / (maxP - minP)
+      local yP = graphY + graphH - 1 - math.floor(normP * (graphH - 1))
+      
+      -- Render Total Line (Solid Block Background)
+      monitor.setCursorPos(x, yT)
+      monitor.setBackgroundColor(lineTotalColor)
+      monitor.write(" ")
+      
+      -- Render Processed Line (Foreground Character Overlay)
+      monitor.setCursorPos(x, yP)
+      if yP ~= yT then
+         monitor.setBackgroundColor(labelBG)
+      end
+      monitor.setTextColor(lineProcColor)
+      monitor.write("x")
+    end
+  end
+
+  -- Render Legends
+  setColors(labelFG, labelBG)
+  monitor.setCursorPos(1, h)
+  monitor.write(string.format("T:%d-%d", minT, maxT))
+  
+  local rightText = string.format("P:%d-%d", minP, maxP)
+  monitor.setCursorPos(w - #rightText + 1, h)
+  monitor.write(rightText)
+end
+
+
 -- Main Logic
 local function writeUsage(providedItems)
   local usage = lib.getUsage()
   
-  -- Refresh settings in case they changed while running
   settings.load() 
   local currentStyle = settings.get("misc.style")
   local currentScale = settings.get("misc.scale")
-  local currentTheme = settings.get("misc.theme") or "light"
-
-  -- Update theme colors if theme changed
   local newTheme = settings.get("misc.theme") or "light"
+
   if newTheme ~= currentTheme then
     currentTheme = newTheme
     local colorsConfig = setThemeColors()
@@ -540,16 +587,14 @@ local function writeUsage(providedItems)
     alertColor = colorsConfig.alertColor
     pieColors = colorsConfig.pieColors
     otherColor = colorsConfig.otherColor
+    lineTotalColor = colorsConfig.lineTotalColor
+    lineProcColor = colorsConfig.lineProcColor
   end
 
-  -- If in pie mode, we need item data.
-  -- Use providedItems (from update event) or fetch fresh list if missing.
   if currentStyle == "pie" then
     if providedItems then
       usage.items = providedItems
     elseif lib.list then
-      -- Fallback for initial render or manual refresh
-      -- We wrap in pcall just in case lib.list isn't available/fails
       local ok, res = pcall(lib.list)
       if ok then usage.items = res end
     end
@@ -560,10 +605,8 @@ local function writeUsage(providedItems)
 
   local drawFunc = styles[currentStyle] or styles.horizontal
   
-  -- Protected call to prevent crashing on drawing errors
   local ok, err = pcall(drawFunc, usage, w, h)
   if not ok then
-    -- Use theme-aware colors for error display
     local errorBG = currentTheme == "dark" and colors.black or colors.white
     local errorFG = currentTheme == "dark" and colors.red or colors.red
     monitor.setBackgroundColor(errorBG)
@@ -587,7 +630,7 @@ writeUsage()
 
 -- Loop Setup
 local watchdogAvaliable = fs.exists("watchdogLib.lua")
-local funcs = {lib.subscribe, handleUpdates}
+local funcs = {lib.subscribe, handleUpdates, trackHistory}
 
 if watchdogAvaliable then
   local watchdogLib = require '.watchdogLib'
