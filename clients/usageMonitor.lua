@@ -25,7 +25,7 @@ if not settings.get("misc.style") then
   settings.save()
 end
 
-if not settings.get("misc.lineInterval") then
+if not settings.get("misc.lineInterval") and settings.get("misc.style") == "line" then
   settings.define("misc.lineInterval", { description = "Interval in seconds for line graph updates", type = "number" })
   print("Enter line graph update interval in seconds (default 30):")
   local s = read()
