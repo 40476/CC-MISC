@@ -98,6 +98,16 @@ local chatboxInstall = {
   }
 }
 
+local passwdInstall = {
+  name = "Password Module",
+  files = {
+    modules = {
+      ["passwd.lua"] = fromRepository "modules/passwd.lua"
+    }
+  }
+}
+
+
 local baseInstall = {
   name = "Base MISC",
   files = {
@@ -135,6 +145,7 @@ local watchdogInstall = {
 local serverInstallOptions = {
   name = "Server installation options",
   b = baseInstall,
+  p = passwdInstall,
   c = craftInstall,
   d = disposalInstall,
   i = introspectionInstall,
@@ -148,6 +159,23 @@ local terminalInstall = {
   name = "Access Terminal",
   files = {
     ["startup.lua"] = fromRepository "clients/terminal.lua",
+    ["modemLib.lua"] = fromRepository "clients/modemLib.lua"
+  }
+}
+
+local secureTerminalInstall = {
+  name = "Secure Access Terminal",
+  files = {
+    ["startup.lua"] = fromRepository "clients/secure_terminal.lua",
+    ["terminal.lua"] = fromRepository "clients/terminal.lua",
+    ["modemLib.lua"] = fromRepository "clients/modemLib.lua"
+  }
+}
+
+local farmerInstall = {
+  name = "Farmer Turtle",
+  files = {
+    ["startup.lua"] = fromRepository "clients/farmer.lua",
     ["modemLib.lua"] = fromRepository "clients/modemLib.lua"
   }
 }
@@ -203,6 +231,8 @@ local clientDisposalInstall = {
 local clientInstallOptions = {
   name = "Client installation options",
   t = terminalInstall,
+  s = secureTerminalInstall,
+  f = farmerInstall,
   i = introspectionTermInstall,
   c = crafterInstall,
   d = clientDisposalInstall,
