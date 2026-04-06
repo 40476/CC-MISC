@@ -38,7 +38,7 @@ Reboot both, the server will ask for a modem, simply input the side your wired m
 
 The access terminal is simple and fast to navigate. Across the top bar is a list of screens, you may click one to jump to it, or press tab to cycle between. Type to enter characters into the search bar, use `^u` (ctrl+u) to clear the search bar. Use up/down to navigate and push enter to select, or use mouse wheel and click.
 
-While on a screen with a search bar you may press `^c` to change theme.
+While on a screen with a search bar you may press `ctrl` + `shift` + `c` to change theme.
 
 ![Themes](docs/assets/themes.png)
 
