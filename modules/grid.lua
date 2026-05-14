@@ -25,6 +25,7 @@ return {
   },
   ---@param loaded {crafting: modules.crafting, logger: modules.logger|nil}
   init = function(loaded, config)
+    
     ---@alias RecipeEntry ItemIndex|ItemIndex[]
 
     ---@class GridRecipe
@@ -39,6 +40,8 @@ return {
     ---@type table<string,GridRecipe[]>
     local gridRecipes = {}
 
+    local crafting = loaded.crafting.interface.recipeInterface
+    
     ---Save the current grid recipes to the recipes file
     local function saveGridRecipes()
       local data = {
@@ -140,7 +143,6 @@ return {
       end
     end
 
-    local crafting = loaded.crafting.interface.recipeInterface
 
     ---Cache information about a GridRecipe that can be inferred from stored data
     ---@param recipe GridRecipe
