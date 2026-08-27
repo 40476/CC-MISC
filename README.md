@@ -1,6 +1,5 @@
 # MISC - Modular Inventory Storage and Crafting
-TEST
-PRs are welcome to this project, I hope the documentation is clear enough, but if you have any questions feel free to ask.
+TEST PRs are welcome to this project, we hope the documentation is clear enough, but if you have any questions feel free to ask.
 
 This documentation is also available at misc.madefor.cc
 
@@ -27,6 +26,8 @@ A minimal MISC system consists of
 The client can be advanced or basic, it supports both mouse and keyboard.
 
 On both your server and all your clients simply run `wget run https://raw.githubusercontent.com/Storehaus/CC-MISC/master/installer.lua`.
+
+To install a version from another repository pass the repo as an argument, for example: `wget run https://raw.githubusercontent.com/Storehaus/CC-MISC/master/installer.lua 40476/CC-MISC`.
 
 On your server select the base MISC system option.
 
