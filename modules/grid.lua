@@ -65,12 +65,15 @@ return {
             craftingRecipe.pattern = {}
             craftingRecipe.key = {}
             
-            -- Convert grid recipe to pattern format
+            -- Convert grid recipe to pattern format.
+            -- Grid recipes store only their actual pattern cells (unpadded), so
+            -- iterate the real cell count instead of assuming a 3x3 grid.
+            local width = recipe.width or 3
             local keys = {}
             local keyChars = { "A", "B", "C", "D", "E", "F", "G", "H", "I" }
             local keyIndex = 1
             
-            for i = 1, 9 do
+            for i = 1, #recipe.recipe do
               local ingredient = recipe.recipe[i]
               if ingredient == 0 then
                 table.insert(craftingRecipe.pattern, " ")
@@ -79,7 +82,7 @@ return {
                 if type(ingredient) == "table" then
                   local options = {}
                   for _, itemIndex in ipairs(ingredient) do
-                    local itemName = crafting.getItemName(itemIndex)
+                    local itemName = crafting.getString(itemIndex)
                     table.insert(options, itemName)
                   end
                   local keyChar = keyChars[keyIndex]
@@ -87,24 +90,23 @@ return {
                   table.insert(craftingRecipe.pattern, keyChar)
                   keyIndex = keyIndex + 1
                 else
-                  local itemName = crafting.getItemName(ingredient)
+                  local itemName = crafting.getString(ingredient)
                   local keyChar = keyChars[keyIndex]
                   keys[keyChar] = itemName
                   table.insert(craftingRecipe.pattern, keyChar)
                   keyIndex = keyIndex + 1
                 end
               end
-              
-              -- Add line breaks for 3x3 grid
-              if i % 3 == 0 and i < 9 then
-                -- Pattern is built row by row, so we'll format it properly
-              end
             end
             
-            -- Format pattern into rows
+            -- Format pattern into rows using the stored shape width
             local formattedPattern = {}
-            for i = 1, #craftingRecipe.pattern, 3 do
-              table.insert(formattedPattern, table.concat({craftingRecipe.pattern[i], craftingRecipe.pattern[i+1] or "", craftingRecipe.pattern[i+2] or ""}))
+            for start = 1, #craftingRecipe.pattern, width do
+              local row = {}
+              for j = 1, width do
+                table.insert(row, craftingRecipe.pattern[start + j - 1] or "")
+              end
+              table.insert(formattedPattern, table.concat(row))
             end
             craftingRecipe.pattern = formattedPattern
             craftingRecipe.key = keys
@@ -117,11 +119,11 @@ return {
                   -- Multiple options
                   local options = {}
                   for _, itemIndex in ipairs(ingredient) do
-                    table.insert(options, crafting.getItemName(itemIndex))
+                    table.insert(options, crafting.getString(itemIndex))
                   end
                   table.insert(craftingRecipe.ingredients, options)
                 else
-                  table.insert(craftingRecipe.ingredients, crafting.getItemName(ingredient))
+                  table.insert(craftingRecipe.ingredients, crafting.getString(ingredient))
                 end
               end
             end
