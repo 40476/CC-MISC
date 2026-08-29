@@ -47,7 +47,15 @@ return {
         local function updateDisposalThresholds()
             disposalThresholds = {}
             for item, threshold in pairs(config.disposal.disposalItems.value) do
-                disposalThresholds[item] = threshold
+                if type(item) ~= "string" or type(threshold) ~= "number" then
+                    disposalLogger:warn(
+                        "Ignoring malformed disposalItems entry (expected [string]=number, got [%s]=%s). " ..
+                        "Check that disposal.disposalItems is configured as a table<pattern:string, threshold:integer>, not an array.",
+                        type(item), type(threshold)
+                    )
+                else
+                    disposalThresholds[item] = threshold
+                end
             end
         end
 
@@ -124,6 +132,11 @@ return {
         ---@return boolean shouldDispose
         ---@return integer excessCount
         local function shouldDisposeItem(name)
+            if type(name) ~= "string" then
+                disposalLogger:warn("shouldDisposeItem called with non-string name (%s); skipping", type(name))
+                return false, 0
+            end
+
             local threshold = disposalThresholds[name]
             if not threshold then return false, 0 end
 
