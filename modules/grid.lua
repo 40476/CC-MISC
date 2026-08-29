@@ -119,11 +119,11 @@ return {
                   -- Multiple options
                   local options = {}
                   for _, itemIndex in ipairs(ingredient) do
-                    table.insert(options, crafting.getString(itemIndex))
+                    table.insert(options, (crafting.getString(itemIndex)))
                   end
                   table.insert(craftingRecipe.ingredients, options)
                 else
-                  table.insert(craftingRecipe.ingredients, crafting.getString(ingredient))
+                  table.insert(craftingRecipe.ingredients, (crafting.getString(ingredient)))
                 end
               end
             end
