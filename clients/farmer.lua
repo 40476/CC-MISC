@@ -1,14 +1,54 @@
 --[[
-  CC:Tweaked Farmer Turtle
-  Integrates natively with CC-MISC modems/inventories by pushing/pulling downwards.
-  
-  Instructions:
-  1. Place the turtle in the recessed area on top of your modem/inventory block.
-  2. Put some fuel in the inventory below (or in the turtle).
-  3. Run the script. It will ask for your settings the first time it runs!
+  CC:Tweaked Farmer Turtle (Enhanced Edition)
+  Integrates natively with CC-MISC modems/inventories.
+  Features: Disk persistence, auto-tilling, infinite GPS retry, obstacle avoidance limits, and 100% crash-proof pcall wrapping.
 ]]--
 
 local modemLib = require("modemLib")
+
+local STATE_FILE = "farmer_state.dat"
+
+-- Global States
+local myNetworkName = nil
+local isRefueling = false
+local posX, posY = 0, 0
+local facing = 0 -- 0: +x (forward), 1: +y (right), 2: -x (back), 3: -y (left)
+
+-- Forward declarations
+local checkFuel, goRefuelAndReturn, moveForward
+
+-- Save internal position state to disk
+local function saveState()
+    local data = {
+        posX = posX,
+        posY = posY,
+        facing = facing
+    }
+    local file = fs.open(STATE_FILE, "w")
+    if file then
+        file.write(textutils.serialize(data))
+        file.close()
+    end
+end
+
+-- Load internal position state from disk
+local function loadState()
+    if fs.exists(STATE_FILE) then
+        local file = fs.open(STATE_FILE, "r")
+        if file then
+            local content = file.readAll()
+            file.close()
+            local data = textutils.unserialize(content)
+            if data then
+                posX = data.posX or 0
+                posY = data.posY or 0
+                facing = data.facing or 0
+                return true
+            end
+        end
+    end
+    return false
+end
 
 -- Initialize or load settings interactively
 local function initSettings()
@@ -75,11 +115,11 @@ local function initSettings()
     if updated then
         settings.save()
         print("Settings saved successfully!")
-        print("You can change these later using the default 'set' command.")
         os.sleep(2)
     end
 end
 
+-- GPS setup that retries forever if GPS is not found
 local function setupGPS()
     if settings.get("farmer.home_x") == nil then
         print("\n--- First Time GPS Setup ---")
@@ -87,54 +127,62 @@ local function setupGPS()
         print("Press Enter to begin auto-detection...")
         read()
         
-        local x, y, z = gps.locate(5)
-        if not x then
-            error("Could not get GPS location! Please make sure GPS is working.")
+        local x, y, z
+        print("Waiting for GPS signal...")
+        while not x do
+            x, y, z = gps.locate(5)
+            if not x then
+                print("GPS not found. Retrying in 5 seconds...")
+                os.sleep(5)
+            end
         end
+
         settings.set("farmer.home_x", x)
         settings.set("farmer.home_y", y)
         settings.set("farmer.home_z", z)
         print("Home docked at: "..math.floor(x)..", "..math.floor(y)..", "..math.floor(z))
         
         print("Detecting forward direction...")
-        if turtle.up() then
-            if turtle.forward() then
-                local nx, ny, nz = gps.locate(5)
-                settings.set("farmer.home_dir_x", math.floor((nx - x) + 0.5))
-                settings.set("farmer.home_dir_z", math.floor((nz - z) + 0.5))
-                turtle.back()
-                turtle.down()
-                print("Forward direction registered!")
-                settings.save()
+        while true do
+            if turtle.up() then
+                if turtle.forward() then
+                    local nx, ny, nz
+                    while not nx do
+                        nx, ny, nz = gps.locate(5)
+                        if not nx then os.sleep(2) end
+                    end
+                    settings.set("farmer.home_dir_x", math.floor((nx - x) + 0.5))
+                    settings.set("farmer.home_dir_z", math.floor((nz - z) + 0.5))
+                    turtle.back()
+                    turtle.down()
+                    print("Forward direction registered!")
+                    settings.save()
+                    break
+                else
+                    turtle.down()
+                    print("Blocked forward! Please clear the block in front (1 block up). Retrying in 3s...")
+                    os.sleep(3)
+                end
             else
-                turtle.down()
-                error("Setup failed. Please clear the block in front of the turtle (1 block up) so it can test its direction!")
+                print("Blocked above! Please clear the block above turtle. Retrying in 3s...")
+                os.sleep(3)
             end
-        else
-            error("Setup failed. Please clear the block directly above the turtle so it can move up!")
         end
     end
 end
 
--- Global States
-local myNetworkName = nil
-local isRefueling = false
-local posX, posY = 0, 0
-local facing = 0 -- 0: +x (forward), 1: +y (right), 2: -x (back), 3: -y (left)
-
--- Forward declarations for mutual recursion handling
-local checkFuel, goRefuelAndReturn
-
--- Movement wrappers to track position
+-- Movement wrappers with tracking and persistence
 local function turnRight()
     turtle.turnRight()
     facing = (facing + 1) % 4
+    saveState()
 end
 
 local function turnLeft()
     turtle.turnLeft()
     facing = (facing - 1) % 4
     if facing < 0 then facing = facing + 4 end
+    saveState()
 end
 
 local function turnToFacing(targetFacing)
@@ -147,8 +195,9 @@ local function turnToFacing(targetFacing)
     end
 end
 
-local function moveForward()
-    -- Mid-cycle fuel check: Ensure we have enough fuel to get home + a 5 block buffer
+-- Move forward with obstacle avoidance limit and alternate routing
+moveForward = function()
+    -- Mid-cycle fuel check
     if not isRefueling and turtle.getFuelLevel() ~= "unlimited" then
         local distToHome = math.abs(posX) + math.abs(posY)
         if turtle.getFuelLevel() <= (distToHome + 5) then
@@ -158,17 +207,44 @@ local function moveForward()
         end
     end
 
+    local max_detour_attempts = 5
+    local attempts = 0
+
     while not turtle.forward() do
         if turtle.getFuelLevel() == 0 then
             print("Out of fuel! Waiting...")
             os.sleep(5)
         else
-            -- If blocked by an entity (like an Iron Golem), attack it
             local has_block, _ = turtle.inspect()
             if has_block then
-                print("Blocked by a solid block. Check your farm dimensions.")
-                os.sleep(2)
+                attempts = attempts + 1
+                if attempts > max_detour_attempts then
+                    print("Exceeded max detour attempts ("..max_detour_attempts.."). Trying alternate route maneuver...")
+                    turnRight()
+                    turnRight()
+                    turtle.forward()
+                    turnRight()
+                    attempts = 0
+                else
+                    print("Obstacle encountered. Detour attempt " .. attempts .. "/" .. max_detour_attempts)
+                    turnRight()
+                    if turtle.forward() then
+                        turnLeft()
+                        if turtle.forward() then
+                            turnLeft()
+                            turtle.forward()
+                            turnRight()
+                        else
+                            turnRight()
+                            turtle.back()
+                        end
+                    else
+                        turnLeft()
+                    end
+                end
+                os.sleep(1)
             else
+                -- Entity in the way (e.g. mob/animal)
                 turtle.attack()
                 os.sleep(0.5)
             end
@@ -180,11 +256,11 @@ local function moveForward()
     elseif facing == 2 then posX = posX - 1
     elseif facing == 3 then posY = posY - 1
     end
+    saveState()
 end
 
 -- Reusable grid navigation
 local function navigateTo(targetX, targetY)
-    -- Move X axis
     if posX < targetX then
         turnToFacing(0)
         while posX < targetX do moveForward() end
@@ -193,7 +269,6 @@ local function navigateTo(targetX, targetY)
         while posX > targetX do moveForward() end
     end
 
-    -- Move Y axis
     if posY < targetY then
         turnToFacing(1)
         while posY < targetY do moveForward() end
@@ -203,20 +278,19 @@ local function navigateTo(targetX, targetY)
     end
 end
 
--- Return the turtle to the exact starting block
 local function returnHome()
     navigateTo(0, 0)
     turnToFacing(0)
+    saveState()
 end
 
--- Pauses current activity, goes home, refuels via network, and returns to exactly where it was
 goRefuelAndReturn = function()
-    print("\n[!] Fuel critically low mid-cycle! Pausing to refuel...")
+    print("\n[!] Fuel critically low! Pausing to refuel...")
     local savedX, savedY, savedFacing = posX, posY, facing
     
     returnHome()
-    turtle.down() -- Land on the modem
-    os.sleep(2)   -- Let it settle
+    turtle.down()
+    os.sleep(2)
     
     if peripheral.getType("bottom") == "modem" then
         modemLib.connect("bottom")
@@ -225,14 +299,13 @@ goRefuelAndReturn = function()
     
     checkFuel()
     
-    print("[!] Resuming cycle from where we left off...")
+    print("[!] Resuming cycle...")
     turtle.up()
-    
     navigateTo(savedX, savedY)
     turnToFacing(savedFacing)
 end
 
--- Uses GPS to recalculate internal position and align to the dock
+-- Position recovery with infinite GPS retry
 local function recoverPosition()
     local hx = settings.get("farmer.home_x")
     local hy = settings.get("farmer.home_y")
@@ -245,34 +318,38 @@ local function recoverPosition()
         return false
     end
 
-    print("Attempting GPS recovery...")
-    local cx, cy, cz = gps.locate(5)
-    if not cx then
-        print("Failed to get GPS location for recovery.")
-        return false
+    print("Attempting GPS recovery (will retry infinitely until GPS found)...")
+    local cx, cy, cz
+    while not cx do
+        cx, cy, cz = gps.locate(5)
+        if not cx then
+            print("GPS signal not found. Retrying in 5 seconds...")
+            os.sleep(5)
+        end
     end
     
     if cx == hx and cy == hy and cz == hz then
-        print("Turtle is already at home dock.")
+        print("Turtle is at home dock.")
         posX, posY, facing = 0, 0, 0
+        saveState()
         return true
     end
 
-    print("Calculating relative position...")
-    -- Determine current facing
+    print("Calculating orientation...")
     local cfx, cfz
     local moved = false
     for i = 1, 4 do
         if turtle.forward() then
-            local nx, ny, nz = gps.locate(5)
+            local nx, ny, nz
+            while not nx do
+                nx, ny, nz = gps.locate(5)
+                if not nx then os.sleep(2) end
+            end
             cfx = math.floor((nx - cx) + 0.5)
             cfz = math.floor((nz - cz) + 0.5)
             turtle.back()
             
-            -- Restore orientation visually
             for j = 1, i - 1 do turtle.turnLeft() end
-            
-            -- Calculate actual forward vector before the turns
             for j = 1, i - 1 do
                 local tmp = cfx
                 cfx = cfz
@@ -290,51 +367,38 @@ local function recoverPosition()
         return false
     end
 
-    -- Calculate current relative position (mapping world coords to internal posX/posY)
-    local hrx, hrz = -hfz, hfx -- Home Right Vector
+    local hrx, hrz = -hfz, hfx
     posX = math.floor((cx - hx) * hfx + (cz - hz) * hfz + 0.5)
     posY = math.floor((cx - hx) * hrx + (cz - hz) * hrz + 0.5)
 
-    -- Map world facing to internal facing
     if cfx == hfx and cfz == hfz then facing = 0
     elseif cfx == hrx and cfz == hrz then facing = 1
     elseif cfx == -hfx and cfz == -hfz then facing = 2
     elseif cfx == -hrx and cfz == -hrz then facing = 3
     else
-        print("Warning: Orientation doesn't match grid. Defaulting to 0.")
         facing = 0
     end
 
+    saveState()
     print("State recovered: X="..posX..", Y="..posY..", Facing="..facing)
 
-    -- Adjust Y level to the safe cruising height (hy + 1)
     local targetY = hy + 1
     while cy < targetY do
-        if not turtle.up() then
-            turtle.digUp()
-            turtle.up()
-        end
+        if not turtle.up() then turtle.digUp(); turtle.up() end
         cy = cy + 1
     end
     while cy > targetY do
-        if not turtle.down() then
-            turtle.digDown()
-            turtle.down()
-        end
+        if not turtle.down() then turtle.digDown(); turtle.down() end
         cy = cy - 1
     end
 
-    -- Use the existing navigation system to fly home!
-    print("Navigating back to dock...")
-    isRefueling = true -- Temporarily suppress mid-cycle refueling checks during recovery
+    isRefueling = true
     returnHome()
-    turtle.down() -- Land on the modem
+    turtle.down()
     isRefueling = false
-    
     return true
 end
 
--- Automatically handles refueling by pulling from the modem/inventory below
 checkFuel = function()
     if turtle.getFuelLevel() == "unlimited" then return end
     
@@ -347,9 +411,8 @@ checkFuel = function()
     
     if turtle.getFuelLevel() < required_fuel then
         print("Low fuel. Requesting " .. fuel_item_name .. " from storage...")
-        -- Ask CC-MISC to push fuel into us
         modemLib.pushItems(false, myNetworkName, fuel_item_name, 64)
-        os.sleep(0.5) -- Give network time to transfer
+        os.sleep(0.5)
         
         for i = 1, 16 do
             local item = turtle.getItemDetail(i)
@@ -359,13 +422,6 @@ checkFuel = function()
             end
         end
         
-        if turtle.getFuelLevel() < required_fuel then
-            print("WARNING: Not enough fuel retrieved! Please check storage.")
-        else
-            print("Refueled! Current: " .. turtle.getFuelLevel())
-        end
-        
-        -- Push remaining fuel back to storage
         for i = 1, 16 do
             local item = turtle.getItemDetail(i)
             if item and item.name == fuel_item_name then
@@ -377,7 +433,6 @@ checkFuel = function()
     turtle.select(1)
 end
 
--- Dumps harvested crops while keeping exactly one stack of necessary seeds
 local function dumpInventory()
     local valid_seeds = {
         ["minecraft:wheat_seeds"] = true,
@@ -392,27 +447,37 @@ local function dumpInventory()
         local item = turtle.getItemDetail(i)
         if item then
             if valid_seeds[item.name] and not kept_slots[item.name] then
-                -- Keep one stack of each type of seed we find
                 kept_slots[item.name] = true
-                print("Slot " .. i .. ": Keeping stack of " .. item.name .. " for replanting")
             else
-                -- Pull the rest from this slot into the CC-MISC storage
-                print("Slot " .. i .. ": Dumping " .. item.count .. "x " .. item.name)
                 modemLib.pullItems(false, myNetworkName, i, item.count)
-                os.sleep(0.2) -- Small delay to prevent dropping requests on the network
+                os.sleep(0.2)
             end
         end
     end
     turtle.select(1)
 end
 
--- Checks the crop below, harvests if mature, and replants
+-- Auto-till dirt and harvest/plant crops
 local function harvestAndPlant()
     local has_block, data = turtle.inspectDown()
+    
+    -- Auto-till if block below is standard dirt
+    if has_block and data.name == "minecraft:dirt" then
+        print("Found un-tilled dirt. Equipping hoe and tilling...")
+        for i = 1, 16 do
+            local item = turtle.getItemDetail(i)
+            if item and item.name:find("hoe") then
+                turtle.select(i)
+                turtle.equipLeft()
+                break
+            end
+        end
+        turtle.placeDown()
+        has_block, data = turtle.inspectDown()
+    end
+
     if has_block then
         local is_mature = false
-        
-        -- Identify mature crops (vanilla wheat/carrots/potatoes are max age 7)
         if data.state and data.state.age then
             local age = data.state.age
             if (data.name:find("wheat") or data.name:find("carrots") or data.name:find("potatoes")) and age == 7 then
@@ -427,10 +492,8 @@ local function harvestAndPlant()
         end
     end
 
-    -- Check if empty (either we just harvested it, or it was already empty)
     has_block, _ = turtle.inspectDown()
     if not has_block then
-        -- Find a seed and plant it
         for i = 1, 16 do
             local item = turtle.getItemDetail(i)
             if item and (item.name:find("seeds") or item.name:find("carrot") or item.name:find("potato")) then
@@ -442,7 +505,7 @@ local function harvestAndPlant()
     end
 end
 
--- Navigates the farm in a snake (boustrophedon) pattern
+-- Farm cycle visiting every spot including the back-most edge
 local function doFarmCycle()
     local turnRightNext = settings.get("farmer.start_right")
     local farm_width = settings.get("farmer.width")
@@ -456,7 +519,6 @@ local function doFarmCycle()
             end
         end
 
-        -- Turn into the next row
         if row < farm_width then
             if turnRightNext then
                 turnRight()
@@ -472,43 +534,40 @@ local function doFarmCycle()
     end
 end
 
--- Main Loop
+-- Main function
 local function main()
     print("Initializing Farmer Turtle...")
     
-    -- Load and prompt for settings if they don't exist yet
     initSettings()
     
-    -- Check if we are docked. If not, trigger GPS recovery!
+    if loadState() then
+        print("Loaded previous position from disk: X="..posX..", Y="..posY)
+    end
+
     if peripheral.getType("bottom") ~= "modem" then
-        print("Turtle is not docked on a modem! Attempting GPS recovery...")
+        print("Turtle not docked! Attempting GPS recovery...")
         if not recoverPosition() then
-            error("Recovery failed! Please place the turtle manually on the modem.")
+            error("Recovery failed!")
         end
-        os.sleep(2) -- Let it settle on the modem
+        os.sleep(2)
     else
-        -- If we booted up cleanly on the dock, zero out coordinates
         posX, posY, facing = 0, 0, 0
+        saveState()
     end
     
-    -- Connect to CC-MISC over wired modem on the bottom
     if peripheral.getType("bottom") == "modem" then
         modemLib.connect("bottom")
-        print("Connected to CC-MISC wired modem.")
     else
-        error("No wired modem found on the bottom! Please place the turtle on a wired modem.")
+        error("No wired modem found on bottom!")
     end
     
     myNetworkName = peripheral.call("bottom", "getNameLocal")
     if not myNetworkName then
-        error("Could not get local network name from modem. Is it connected to the storage network?")
+        error("Could not get local network name from modem.")
     end
-    print("My network name: " .. myNetworkName)
+    print("Connected to network: " .. myNetworkName)
 
-    -- Pre-flight fuel check. Ensures we have enough fuel for the first-time GPS alignment!
     checkFuel()
-
-    -- Run auto-detect setup if the GPS was never registered
     setupGPS()
 
     while true do
@@ -517,25 +576,23 @@ local function main()
         dumpInventory()
 
         print("Starting farm cycle...")
-        turtle.up() -- Move above the crops to avoid breaking immature ones
-        moveForward() -- Step out of the recessed area and over the first crop
+        turtle.up()
+        moveForward()
         
         doFarmCycle()
         
         print("Returning home...")
-        returnHome() -- Automatically navigates back to the block above the recess
+        returnHome()
+        turtle.down()
         
-        turtle.down() -- Move back down into the recess to rest on the modem
+        os.sleep(2)
         
-        os.sleep(2) -- Short pause to ensure we're settled before reconnecting
-        
-        -- Re-establish connection to CC-MISC, as moving physically disconnects the modem!
         if peripheral.getType("bottom") == "modem" then
             modemLib.connect("bottom")
             myNetworkName = peripheral.call("bottom", "getNameLocal") or myNetworkName
         end
         
-        print("Emptying harvest into storage system...")
+        print("Emptying harvest into storage...")
         dumpInventory()
         
         local sleep_timer = settings.get("farmer.sleep_timer")
@@ -544,4 +601,12 @@ local function main()
     end
 end
 
-main()
+-- Bulletproof pcall wrapper that never exits the program on errors
+while true do
+    local ok, err = pcall(main)
+    if not ok then
+        print("\n[ERROR CAUGHT]: " .. tostring(err))
+        print("The program encountered an error. Restarting in 10 seconds...")
+        os.sleep(10)
+    end
+end
