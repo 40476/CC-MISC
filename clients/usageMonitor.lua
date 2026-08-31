@@ -17,8 +17,8 @@ if wirelessMode and not settings.get("misc.websocketURL") then
 end
 
 if not settings.get("misc.style") then
-  settings.define("misc.style", { description = "Display style: horizontal, vertical, big, text, pie, line", type = "string" })
-  print("Choose display style (horizontal, vertical, big, text, pie, line):")
+  settings.define("misc.style", { description = "Display style: horizontal, vertical, big, text, pie, line, list, compact, gauge", type = "string" })
+  print("Choose display style (horizontal, vertical, big, text, pie, line, list, compact, gauge):")
   local s = read()
   if s == "" then s = "horizontal" end
   settings.set("misc.style", s)
@@ -567,6 +567,130 @@ styles.line = function(usage, w, h)
   monitor.write(rightText)
 end
 
+-- Item list: shows the top-quantity items that fit on screen, each as a
+-- mini proportional bar (relative to the largest item) with name + count.
+styles.list = function(usage, w, h)
+  setColors(labelFG, labelBG)
+  monitor.clear()
+
+  local slots = string.format("Total %u", usage.total)
+  centerText(1, slots)
+
+  if not usage.items or #usage.items == 0 then
+    centerText(math.floor(h / 2), "No item data")
+    return
+  end
+
+  table.sort(usage.items, function(a, b) return (a.count or 0) > (b.count or 0) end)
+
+  local headerRows = 1
+  local footerRows = 1
+  local availableRows = h - headerRows - footerRows
+  if availableRows < 1 then availableRows = 1 end
+
+  local numToShow = math.min(#usage.items, availableRows)
+  local maxCount = usage.items[1].count or 1
+  if maxCount <= 0 then maxCount = 1 end
+
+  for i = 1, numToShow do
+    local item = usage.items[i]
+    local count = item.count or 0
+    local name = item.displayName or item.name or "Unknown"
+    local y = headerRows + i
+
+    local countStr = tostring(count)
+    local barMaxWidth = w - #countStr - 2
+    if barMaxWidth < 1 then barMaxWidth = 1 end
+
+    local barWidth = math.floor((count / maxCount) * barMaxWidth)
+    if barWidth < 0 then barWidth = 0 end
+    if barWidth > barMaxWidth then barWidth = barMaxWidth end
+
+    -- Proportional bar background, cycling through the pie palette
+    local barColor = pieColors[((i - 1) % #pieColors) + 1]
+    monitor.setCursorPos(1, y)
+    monitor.setBackgroundColor(barColor)
+    monitor.write(string.rep(" ", barWidth))
+    monitor.setBackgroundColor(labelBG)
+    monitor.write(string.rep(" ", barMaxWidth - barWidth))
+
+    -- Item name, truncated to fit inside the bar area
+    local maxNameWidth = barMaxWidth - 1
+    if maxNameWidth < 1 then maxNameWidth = 1 end
+    if #name > maxNameWidth then
+      name = string.sub(name, 1, math.max(maxNameWidth - 3, 1)) .. "..."
+    end
+    monitor.setCursorPos(2, y)
+    monitor.setTextColor(labelFG)
+    monitor.write(name)
+
+    -- Count, right-aligned
+    setColors(labelFG, labelBG)
+    monitor.setCursorPos(w - #countStr + 1, y)
+    monitor.write(countStr)
+  end
+
+  setColors(labelFG, labelBG)
+  if #usage.items > numToShow then
+    local moreStr = string.format("+%d more item%s", #usage.items - numToShow, (#usage.items - numToShow == 1) and "" or "s")
+    monitor.setCursorPos(1, h)
+    monitor.write(moreStr)
+  else
+    local usedStr = string.format("Used %u / %u", usage.used, usage.total)
+    monitor.setCursorPos(1, h)
+    monitor.write(usedStr)
+  end
+end
+
+-- Compact: a minimal single-line summary, useful for small monitors.
+-- Background color shifts with fill level, same thresholds as "big".
+styles.compact = function(usage, w, h)
+  local pct = getPercentage(usage)
+
+  local bg = freeBG
+  if pct > 0.75 then bg = usedBG
+  elseif pct > 0.5 then bg = alertColor end
+
+  local textColor = currentTheme == "dark" and colors.white or colors.black
+  setColors(textColor, bg)
+  monitor.clear()
+
+  local line = string.format("%u / %u  (%d%%)", usage.used, usage.total, math.floor(pct * 100))
+  centerText(math.floor(h / 2) + 1, line)
+end
+
+-- Gauge: an ASCII bracket progress bar. Unlike horizontal/vertical this
+-- doesn't rely on colored fills, so it reads fine on basic monitors too.
+styles.gauge = function(usage, w, h)
+  setColors(labelFG, labelBG)
+  monitor.clear()
+
+  local title = string.format("Total %u", usage.total)
+  centerText(1, title)
+
+  local pct = getPercentage(usage)
+  local innerWidth = w - 4
+  if innerWidth < 1 then innerWidth = 1 end
+
+  local filled = math.floor(pct * innerWidth)
+  if filled > innerWidth then filled = innerWidth end
+  local bar = "[" .. string.rep("=", filled) .. string.rep("-", innerWidth - filled) .. "]"
+
+  local barY = math.floor(h / 2)
+  monitor.setCursorPos(2, barY)
+  monitor.write(bar)
+
+  local pctStr = string.format("%d%%", math.floor(pct * 100))
+  centerText(barY + 2, pctStr)
+
+  local used = string.format("Used %u", usage.used)
+  monitor.setCursorPos(1, h)
+  monitor.write(used)
+
+  local free = string.format("Free %u", usage.free)
+  monitor.setCursorPos(w - #free + 1, h)
+  monitor.write(free)
+end
 
 -- Main Logic
 local function writeUsage(providedItems)
@@ -591,7 +715,7 @@ local function writeUsage(providedItems)
     lineProcColor = colorsConfig.lineProcColor
   end
 
-  if currentStyle == "pie" then
+  if currentStyle == "pie" or currentStyle == "list" then
     if providedItems then
       usage.items = providedItems
     elseif lib.list then
