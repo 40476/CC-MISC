@@ -1,5 +1,5 @@
 --[[
-  CC:Tweaked Farmer Turtle (Enhanced Edition)
+  CC:Tweaked Farmer Turtle
   Integrates natively with CC-MISC modems/inventories.
   Features: Disk persistence, auto-tilling, infinite GPS retry, obstacle avoidance limits, and 100% crash-proof pcall wrapping.
 ]]--
@@ -399,6 +399,7 @@ local function recoverPosition()
     return true
 end
 
+-- Refueling function updated to block departure until fuel requirement is met
 checkFuel = function()
     if turtle.getFuelLevel() == "unlimited" then return end
     
@@ -409,8 +410,8 @@ checkFuel = function()
 
     local required_fuel = (farm_len * farm_wid) + farm_len + farm_wid + min_fuel
     
-    if turtle.getFuelLevel() < required_fuel then
-        print("Low fuel. Requesting " .. fuel_item_name .. " from storage...")
+    while turtle.getFuelLevel() < required_fuel do
+        print("Low fuel (" .. turtle.getFuelLevel() .. "/" .. required_fuel .. "). Requesting " .. fuel_item_name .. "...")
         modemLib.pushItems(false, myNetworkName, fuel_item_name, 64)
         os.sleep(0.5)
         
@@ -428,6 +429,12 @@ checkFuel = function()
                 modemLib.pullItems(false, myNetworkName, i, item.count)
                 os.sleep(0.2)
             end
+        end
+
+        -- If fuel is still below the threshold, pause before checking again
+        if turtle.getFuelLevel() < required_fuel then
+            print("Fuel threshold not met. Waiting 10s for fuel supply...")
+            os.sleep(10)
         end
     end
     turtle.select(1)
