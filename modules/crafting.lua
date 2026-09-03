@@ -670,14 +670,18 @@ return {
       common.enforceType(to, 1, "string")
       common.enforceType(name, 2, "string")
       common.enforceType(toMove, 3, "integer")
-      common.enforceType(slot, 4, "integer")
+      common.enforceType(slot, 4, "integer", "nil")  -- allow nil now
       local failCount = 0
       while toMove > 0 do
-        local transfered = loaded.inventory.interface.pushItems(false, to, name, toMove, slot, nil, { optimal = false })
+        local transfered = loaded.inventory.interface.pushItems(false, to, name, toMove, slot, nil, { optimal = true })
         toMove = toMove - transfered
         if transfered == 0 then
           failCount = failCount + 1
-          if failCount > 3 then error(("Unable to move %s"):format(name)) end
+          if failCount > 3 then
+            error(("Unable to move %s (still need %d, target slot=%s)"):format(name, toMove, tostring(slot)))
+          end
+        else
+          failCount = 0 -- reset on any progress instead of only counting consecutive total-zero calls
         end
       end
     end
